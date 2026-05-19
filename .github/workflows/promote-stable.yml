@@ -1,0 +1,52 @@
+name: Promote main to stable
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: 'SHA to promote (default: current main HEAD)'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Fast-forward stable to target SHA
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          TARGET="${{ inputs.sha }}"
+          if [ -z "$TARGET" ]; then
+            TARGET=$(git rev-parse origin/main)
+          fi
+          echo "Promoting to: $TARGET"
+
+          # Verify target is reachable
+          git cat-file -e "$TARGET^{commit}" || { echo "SHA not found: $TARGET"; exit 1; }
+
+          if git ls-remote --heads origin stable | grep -q refs/heads/stable; then
+            git fetch origin stable:stable
+            git checkout stable
+            # Only allow fast-forward (no rewrites)
+            git merge --ff-only "$TARGET" || {
+              echo "ERROR: non-fast-forward — refusing. To rewrite stable, delete branch first."
+              exit 1
+            }
+            git push origin stable
+          else
+            echo "Creating stable branch at $TARGET"
+            git push origin "$TARGET:refs/heads/stable"
+          fi
+
+          echo "✅ stable now at: $(git rev-parse stable 2>/dev/null || echo $TARGET)"
